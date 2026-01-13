@@ -26,9 +26,9 @@
 -   **X and C recombination** when a receptor X or C element become “recombinant breakpoint”. Donor chromosome end is chosen at random (among those ≥ Ls in the same cell). Recombination at X causes receptor to capture **donor telomere length**. Recombination at C causes receptor to capture donor **Y’s, X and telomere length**.
 -   **Telomeric recombination (HR)**
 -   **Donor telomere choice**: --donor-mode
--   0= **uniform** among eligible **donors** (\>Ls)
--   1= weighted by **telomere length** among eligible **donors**
--   2= **max** telomere length among eligible **donors**
+    -   0= **uniform** among eligible **donors** (\>Ls)
+    -   1= weighted by **telomere length** among eligible **donors**
+    -   2= **max** telomere length among eligible **donors**
 -   **Telomeric recombination** **modes** (--rec-tel-mode): Once the donor telomere is identified, recombination between telomeres can cause:
     -   copy: receptor telomere (TelR’) becomes donor **TelD** (assumes recombination at the base of the telomere repeats; default).
     -   rnd: receptor telomere becomes **TelR' = rR + (TelD - rD)** with random cut points on receptor telomere (rR) and donor telomere (rD).
