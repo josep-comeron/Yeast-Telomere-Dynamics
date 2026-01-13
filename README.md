@@ -5,7 +5,7 @@
 **1.1 Chromosome ends**
 
 -   Cells have **32 chromosome ends** (N_ENDS=32).
--   Each end has (in order from the telomere): **Telomere length** (int), **X** (one per end), **Y elements** (0...cap), and **C** (one per end).
+-   Each end has (in order from the telomere): **Telomere length** (int), **Y elements** (0...cap), and **X** (one per end).
 
 **1.2 Cell division, telomere erosion, senescence and recombination dynamics**
 
@@ -17,12 +17,12 @@
 -   If the chosen parent cell is **senescent**, it will either:
     -   **Die** with probability --p-sen-death, and is removed.
     -   **Attempt recombination** (if --rec-model = 1) to repair its short ends. Recombination is applied one chromosome end with \<Ls at a time.
--   **Recombination breakpoint on the receptor end** (telomeres \<Ls): An end has 3 constant elements (**Tel**, **X**, **C**) plus **Y’ count** copies of Y. Resection in short telomeres (\<Ls) is assumed to be long, beyond the telomere repeat. The recombination breakpoint is chosen **uniformly** among these elements (probability = 1 / (3 + Y’ count)).
+-   **Recombination breakpoint on the receptor end** (telomeres \<Ls): An end has 2 constant elements (**Tel**, **X**) plus **Y’ count** copies of Y. Resection in short telomeres (\<Ls) is assumed to be long, beyond the telomere repeat. The recombination breakpoint is chosen **uniformly** among these elements (probability = 1 / (2 + Y’ count)).
 -   **Donor chromosome end eligibility** is set by --rec-model:
     -   0= off (no recombination)
     -   1= recombination can occur in senescent cells. **Only chromosome ends with telomeres ≥ Ls** **in the same cell** can be donor; if none exist in this cell, no recombination.
--   **Y’ recombination** when a receptor Y’ element becomes “recombinant breakpoint”. Donor chromosome end is either random (among those ≥ Ls) or optionally **weighted by donor chromosome end Y’ count** (if --rec-y-weighted flag is present). If donor has multiple Y’s, one is chosen at random. Recombination between Y’ receptor and Y’ donor also causes receptor chromosome end to capture all **donor terminal Y’ elements** (if any) **and donor telomere length**.
--   **X and C recombination** when a receptor X or C element become “recombinant breakpoint”. Donor chromosome end is chosen at random (among those ≥ Ls in the same cell). Recombination at X causes receptor to capture **donor telomere length**. Recombination at C causes receptor to capture donor **Y’s, X and telomere length**.
+-   **Y’ recombination** (when a receptor Y’ element becomes “recombinant breakpoint”). Donor chromosome end is either random (among those ≥ Ls) or optionally **weighted by donor chromosome end Y’ count** (if --rec-y-weighted flag is present). If donor has multiple Y’s, one is chosen at random. Recombination between Y’ receptor and Y’ donor also causes receptor chromosome end to capture all **donor terminal Y’ elements** (if any), **and donor telomere length**.
+-   **X recombination** (when a receptor X element becomes the “recombinant breakpoint”). Donor chromosome end is chosen at random (among those ≥ Ls in the same cell). Recombination at X causes receptor to capture **all donor Y’ elements and telomere length**.
 -   **Telomeric recombination (HR)**
     -   **Donor telomere choice**: --donor-mode
         -   0= **uniform** among eligible **donors** (\>Ls)
