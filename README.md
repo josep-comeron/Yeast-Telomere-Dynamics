@@ -35,10 +35,10 @@
     -   end: like rnd but **rR = TelR** (receptor telomere uses its terminal end).
 -   **Template switching (ALT)**. After telomeric HR, the receptor telomere (with its new length) can recombine again with a new telomere donor (template switching) with probability --prob-ts. Additional donor telomere choice follows --donor-mode. Receptor always uses --rec-tel-mode **end** for these secondary events. Successful ‘jumps’ allow further jumps (each with --prob-ts), up to 5.
 -   **Circles (ALT: extrachromosomal templates)**
--   **Static circles**. --prob-circle gives a **constant per-cell** probability that a short telomere uses a t-circle instead of a chromosomal donor when chosen for recombination. If a t-circle is chosen as donor, it **adds** circle_len nucleotides to that telomere length.
--   **Dynamic circles.** When the --dynamic-circles flag is used, each cell carries its **own** prob-circle value (starts at 0).
-    -   Every time a resected telomere (\<Ls) generates length ≥ --min-len-circle-generation by HR or HR+Template switching, it **adds** --prob-each-circle to this cell’s circle probability (prob-circle, clipped to 1).
-    -   On **division (post-senescent; all telomeres \>Ls)**, the cell’s prob_circle is **split 50/50** between parent and daughter.
+    -   **Static circles**. --prob-circle gives a **constant per-cell** probability that a short telomere uses a t-circle instead of a chromosomal donor when chosen for recombination. If a t-circle is chosen as donor, it **adds** circle_len nucleotides to that telomere length.
+    -   **Dynamic circles.** When the --dynamic-circles flag is used, each cell carries its **own** prob-circle value (starts at 0).
+        -   Every time a resected telomere (\<Ls) generates length ≥ --min-len-circle-generation by HR or HR+Template switching, it **adds** --prob-each-circle to this cell’s circle probability (prob-circle, clipped to 1).
+        -   On **division (post-senescent; all telomeres \>Ls)**, the cell’s prob_circle is **split 50/50** between parent and daughter.
 
 **1.3 Cell passages and Limits to cell number**
 
