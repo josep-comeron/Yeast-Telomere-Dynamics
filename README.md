@@ -18,46 +18,27 @@
     -   **Die** with probability --p-sen-death, and is removed.
     -   **Attempt recombination** (if --rec-model = 1) to repair its short ends. Recombination is applied one chromosome end with \<Ls at a time.
 -   **Recombination breakpoint on the receptor end** (telomeres \<Ls):
-
-    An end has 3 constant elements (**Tel**, **X**, **C**) plus **Y’ count** copies of Y. Resection in short telomeres (\<Ls) is assumed to be long, beyond the telomere repeat. The recombination breakpoint is chosen **uniformly** among these elements (probability = 1 / (3 + Y’ count)).
-
+-   An end has 3 constant elements (**Tel**, **X**, **C**) plus **Y’ count** copies of Y. Resection in short telomeres (\<Ls) is assumed to be long, beyond the telomere repeat. The recombination breakpoint is chosen **uniformly** among these elements (probability = 1 / (3 + Y’ count)).
 -   **Donor chromosome end eligibility** is set by --rec-model:
-
-    0= off (no recombination)
-
-    1= recombination can occur in senescent cells. **Only chromosome ends with telomeres ≥ Ls** **in the same cell** can be donor; if none exist in this cell, no recombination.
-
+    -   0= off (no recombination)
+    -   1= recombination can occur in senescent cells. **Only chromosome ends with telomeres ≥ Ls** **in the same cell** can be donor; if none exist in this cell, no recombination.
 -   **Y’ recombination** when a receptor Y’ element becomes “recombinant breakpoint”. Donor chromosome end is either random (among those ≥ Ls) or optionally **weighted by donor chromosome end Y’ count** (if --rec-y-weighted flag is present). If donor has multiple Y’s, one is chosen at random. Recombination between Y’ receptor and Y’ donor also causes receptor chromosome end to capture all **donor terminal Y’ elements** (if any) **and donor telomere length**.
 -   **X and C recombination** when a receptor X or C element become “recombinant breakpoint”. Donor chromosome end is chosen at random (among those ≥ Ls in the same cell). Recombination at X causes receptor to capture **donor telomere length**. Recombination at C causes receptor to capture donor **Y’s, X and telomere length**.
 -   **Telomeric recombination (HR)**
 -   **Donor telomere choice**: --donor-mode
-
-0= **uniform** among eligible **donors** (\>Ls)
-
-1= weighted by **telomere length** among eligible **donors**
-
-2= **max** telomere length among eligible **donors**
-
--   **Telomeric recombination** **modes** (--rec-tel-mode):
-
-    Once the donor telomere is identified, recombination between telomeres can cause:
-
-    copy: receptor telomere (TelR’) becomes donor **TelD** (assumes recombination at the base of the telomere repeats; default).
-
-    rnd: receptor telomere becomes **TelR' = rR + (TelD - rD)** with random cut points on receptor telomere (rR) and donor telomere (rD).
-
-    end: like rnd but **rR = TelR** (receptor telomere uses its terminal end).
-
+-   0= **uniform** among eligible **donors** (\>Ls)
+-   1= weighted by **telomere length** among eligible **donors**
+-   2= **max** telomere length among eligible **donors**
+-   **Telomeric recombination** **modes** (--rec-tel-mode): Once the donor telomere is identified, recombination between telomeres can cause:
+    -   copy: receptor telomere (TelR’) becomes donor **TelD** (assumes recombination at the base of the telomere repeats; default).
+    -   rnd: receptor telomere becomes **TelR' = rR + (TelD - rD)** with random cut points on receptor telomere (rR) and donor telomere (rD).
+    -   end: like rnd but **rR = TelR** (receptor telomere uses its terminal end).
 -   **Template switching (ALT)**. After telomeric HR, the receptor telomere (with its new length) can recombine again with a new telomere donor (template switching) with probability --prob-ts. Additional donor telomere choice follows --donor-mode. Receptor always uses --rec-tel-mode **end** for these secondary events. Successful ‘jumps’ allow further jumps (each with --prob-ts), up to 5.
 -   **Circles (ALT: extrachromosomal templates)**
-
-    **Static circles**. --prob-circle gives a **constant per-cell** probability that a short telomere uses a t-circle instead of a chromosomal donor when chosen for recombination. If a t-circle is chosen as donor, it **adds** circle_len nucleotides to that telomere length.
-
-    **Dynamic circles.** When the --dynamic-circles flag is used, each cell carries its **own** prob-circle value (starts at 0).
-
-    Every time a resected telomere (\<Ls) generates length ≥ --min-len-circle-generation by HR or HR+Template switching, it **adds** --prob-each-circle to this cell’s circle probability (prob-circle, clipped to 1).
-
-    On **division (post-senescent; all telomeres \>Ls)**, the cell’s prob_circle is **split 50/50** between parent and daughter.
+-   **Static circles**. --prob-circle gives a **constant per-cell** probability that a short telomere uses a t-circle instead of a chromosomal donor when chosen for recombination. If a t-circle is chosen as donor, it **adds** circle_len nucleotides to that telomere length.
+-   **Dynamic circles.** When the --dynamic-circles flag is used, each cell carries its **own** prob-circle value (starts at 0).
+    -   Every time a resected telomere (\<Ls) generates length ≥ --min-len-circle-generation by HR or HR+Template switching, it **adds** --prob-each-circle to this cell’s circle probability (prob-circle, clipped to 1).
+    -   On **division (post-senescent; all telomeres \>Ls)**, the cell’s prob_circle is **split 50/50** between parent and daughter.
 
 **1.3 Cell passages and Limits to cell number**
 
