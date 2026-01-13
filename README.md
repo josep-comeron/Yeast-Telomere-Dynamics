@@ -16,10 +16,11 @@
 -   On **division** (non-senescent cells), both the parent and the daughter independently erode (lose) telomeric DNA at an average rate of --del-rate (nucleotides per telomere per division). To follow DNA replication biology, random half the ends erode via Poisson(2 × del_rate) to ensure per-end average deletion rate.
 -   If the chosen parent cell is **senescent**, it will either:
     -   **Die** with probability --p-sen-death, and is removed.
-        -   **Attempt recombination** (if --rec-model = 1) to repair its short ends. Recombination is applied one chromosome end with \<Ls at a time.
+    -   **Attempt recombination** (if --rec-model = 1) to repair its short ends. Recombination is applied one chromosome end with \<Ls at a time.
 -   **Recombination breakpoint on the receptor end** (telomeres \<Ls):
--   An end has 3 constant elements (**Tel**, **X**, **C**) plus **Y’ count** copies of Y.
--   Resection in short telomeres (\<Ls) is assumed to be long, beyond the telomere repeat. The recombination breakpoint is chosen **uniformly** among these elements (probability = 1 / (3 + Y’ count)).
+
+    An end has 3 constant elements (**Tel**, **X**, **C**) plus **Y’ count** copies of Y. Resection in short telomeres (\<Ls) is assumed to be long, beyond the telomere repeat. The recombination breakpoint is chosen **uniformly** among these elements (probability = 1 / (3 + Y’ count)).
+
 -   **Donor chromosome end eligibility** is set by --rec-model:
 
     0= off (no recombination)
@@ -45,7 +46,7 @@
 
     rnd: receptor telomere becomes **TelR' = rR + (TelD - rD)** with random cut points on receptor telomere (rR) and donor telomere (rD).
 
-end: like rnd but **rR = TelR** (receptor telomere uses its terminal end).
+    end: like rnd but **rR = TelR** (receptor telomere uses its terminal end).
 
 -   **Template switching (ALT)**. After telomeric HR, the receptor telomere (with its new length) can recombine again with a new telomere donor (template switching) with probability --prob-ts. Additional donor telomere choice follows --donor-mode. Receptor always uses --rec-tel-mode **end** for these secondary events. Successful ‘jumps’ allow further jumps (each with --prob-ts), up to 5.
 -   **Circles (ALT: extrachromosomal templates)**
