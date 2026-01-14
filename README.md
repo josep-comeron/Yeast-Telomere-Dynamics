@@ -51,23 +51,32 @@
 
 **2) Simulation phases**
 
-1.  **Initialization: Telomere lengths and Y’ number and distribution in original cell**
+**Initialization: Telomere lengths and Y’ number and distribution in original cell**
+
 -   Telomere length across chromosome ends generated from --init-len (Poisson around mean init-len; clipped to ≥Ls) or from a file with specific lengths (--init-len-file, with 32 lines). Default --init-len 225.
 -   Number and distribution of Y’ elements across chromosome ends generated from the total number of Y’s in the cell --init-Ys (multinomial distributed across ends) or from a file with specific distribution (--init-Y-file, 32 lines). Default --init-Ys 0.
 -   Y counts per chromosome end are capped by --max-Ys (default 50).
-    1.  **Pre-evolution**
+
+**Pre-evolution**
+
 -   To add heterogeneity among cells and chromosome ends, exponential growth is applied for user-defined PDs (--pd-pre; default 10)
 -   In each pre-PD, cell and chromosome end dynamics as described in 1.2 (Cell division, telomere erosion, senescence and recombination dynamics) with the difference that telomeres in parent and children cells get symmetric changes in length, ±Poisson(del_rate) per end (50/50), clipped to ≥Ls (no senescent cells are generated).
 -   Applies **hard subsampling** if pertinent (see 1.3).
-    1.  **Replicates**
+
+**Replicates**
+
 -   The same pre-evolved population is used for multiple replicates.
 -   From the pre-evolved cell pool, an **independent** sample of --init-n-cells (randomly chosen without replacement) per replicate is used to seed the main population.
-    1.  **Main evolution**
+
+**Main evolution**
+
 -   Starts with init-n-cells and follows exponential growth for –pd-max PDs.
 -   If --prob-circle \> 0, all seeding cells and all their daughter cells are assigned prob_circle. If the --dynamic-circles flag is present, all seeding cells are assigned --prob-circle =0.
 -   In each PD, cell and chromosome end dynamics as described in 1.2 (Cell division, telomere erosion, senescence and recombination dynamics).
 -   Applies **subsampling** and **hard subsampling** if pertinent (see 1.3).
-    1.  **Stopping criteria**
+
+**Stopping criteria**
+
 -   If at any point, no dividing cells remain in the population, replicate stops early (before pd_max).
 -   If at any PD the fraction of senescent cells ≥ --max-freq-senesc (default 0.9999), the replicate stops and is recorded as fully senescent (fraction of senescent cells =1.0).
 
