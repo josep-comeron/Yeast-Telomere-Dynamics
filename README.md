@@ -18,31 +18,31 @@
         -   **Die** with probability --p-sen-death, and is removed.
         -   **Attempt recombination** (if --rec-model = 1) to repair its short ends. Recombination is applied one chromosome end with \<Ls at a time.
 -   **Recombination breakpoint on the receptor end** (telomeres \<Ls):
-    1.  An end has 2 constant elements (**Tel**, **X**) plus **Y’ count** copies of Y.
-    2.  Resection in short telomeres (\<Ls) is assumed to be long, beyond the telomere repeat. The recombination breakpoint is chosen **uniformly** among these elements (probability = 1 / (2 + Y’ count)).
+    -   An end has 2 constant elements (**Tel**, **X**) plus **Y’ count** copies of Y.
+    -   Resection in short telomeres (\<Ls) is assumed to be long, beyond the telomere repeat. The recombination breakpoint is chosen **uniformly** among these elements (probability = 1 / (2 + Y’ count)).
 -   **Donor chromosome end eligibility** is set by --rec-model:
-    1.  0 = off (no recombination)
-    2.  1 = recombination can occur in senescent cells. **Only chromosome ends with telomeres ≥ Ls** **in the same cell** can be donor; if none exist in this cell, no recombination.
+    -   0 = off (no recombination)
+    -   1 = recombination can occur in senescent cells. **Only chromosome ends with telomeres ≥ Ls** **in the same cell** can be donor; if none exist in this cell, no recombination.
 -   **Y’ recombination** (when a receptor Y’ element becomes “recombinant breakpoint”). Donor chromosome end is either random (among those ≥ Ls) or optionally **weighted by donor chromosome end Y’ count** (if --rec-y-weighted flag is present). If donor has multiple Y’s, one is chosen at random. Recombination between Y’ receptor and Y’ donor also causes receptor chromosome end to capture all **donor terminal Y’ elements** (if any) **and donor telomere length**.
 -   **X recombination** (when a receptor X element becomes “recombinant breakpoint”). Donor chromosome end is chosen at random (among those ≥ Ls in the same cell). Recombination at X causes receptor to capture **all** **donor Y’ elements** and **donor telomere length**.
 -   **Telomeric recombination (HR)**
--   **Donor telomere choice**: --donor-mode
-    -   0 = **uniform** among eligible **donors** (\>Ls)
-    -   1 = weighted by **telomere length** among eligible **donors**
-    -   2 = **max** telomere length among eligible **donors**
--   **Telomeric recombination** **modes** (--rec-tel-mode):
+    -   **Donor telomere choice**: --donor-mode:
+        -   0 = **uniform** among eligible **donors** (\>Ls)
+        -   1 = weighted by **telomere length** among eligible **donors**
+        -   2 = **max** telomere length among eligible **donors**
+    -   **Telomeric recombination** **modes** (--rec-tel-mode):
 
-    Once the donor telomere is identified, recombination between telomeres can cause:
+        Once the donor telomere is identified, recombination between telomeres can cause:
 
-    -   copy: receptor telomere (TelR’) becomes donor **TelD** (assumes recombination at the base of the telomere repeats; default).
-    -   rnd: receptor telomere becomes **TelR' = rR + (TelD - rD)** with random cut points on receptor telomere (rR) and donor telomere (rD).
-    -   end: like rnd but **rR = TelR** (receptor telomere uses its terminal end).
--   **Template switching (ALT)**. After telomeric HR, the receptor telomere (with its new length) can recombine again with a new telomere donor (template switching) with probability --prob-ts. Additional donor telomere choice follows --donor-mode. Receptor always uses --rec-tel-mode **end** for these secondary events. Successful ‘jumps’ allow further jumps (each with --prob-ts), up to 5.
--   **Circles (ALT: extrachromosomal templates)**
--   **Static circles**. --prob-circle gives a **constant per-cell** probability that a short telomere uses a t-circle instead of a chromosomal donor when chosen for recombination. If a t-circle is chosen as donor, it **adds** circle_len nucleotides to that telomere length.
--   **Dynamic circles.** When the --dynamic-circles flag is used, each cell carries its **own** prob-circle value (starts at 0).
-    -   Every time a resected telomere (\<Ls) generates length ≥ --min-len-circle-generation by HR or HR+Template switching, it **adds** --prob-each-circle to this cell’s circle probability (prob-circle, clipped to 1).
-        -   On **division (post-senescent; all telomeres \>Ls)**, the cell’s prob_circle is **split 50/50** between parent and daughter.
+        -   copy: receptor telomere (TelR’) becomes donor **TelD** (assumes recombination at the base of the telomere repeats; default).
+        -   rnd: receptor telomere becomes **TelR' = rR + (TelD - rD)** with random cut points on receptor telomere (rR) and donor telomere (rD).
+        -   end: like rnd but **rR = TelR** (receptor telomere uses its terminal end).
+    -   **Template switching (ALT)**. After telomeric HR, the receptor telomere (with its new length) can recombine again with a new telomere donor (template switching) with probability --prob-ts. Additional donor telomere choice follows --donor-mode. Receptor always uses --rec-tel-mode **end** for these secondary events. Successful ‘jumps’ allow further jumps (each with --prob-ts), up to 5.
+    -   **Circles (ALT: extrachromosomal templates)**
+        -   **Static circles**. --prob-circle gives a **constant per-cell** probability that a short telomere uses a t-circle instead of a chromosomal donor when chosen for recombination. If a t-circle is chosen as donor, it **adds** circle_len nucleotides to that telomere length.
+        -   **Dynamic circles.** When the --dynamic-circles flag is used, each cell carries its **own** prob-circle value (starts at 0).
+            -   Every time a resected telomere (\<Ls) generates length ≥ --min-len-circle-generation by HR or HR+Template switching, it **adds** --prob-each-circle to this cell’s circle probability (prob-circle, clipped to 1).
+            -   On **division (post-senescent; all telomeres \>Ls)**, the cell’s prob_circle is **split 50/50** between parent and daughter.
 
 **1.3 Cell passages and Limits to cell number**
 
@@ -81,8 +81,9 @@ JIT hot loops: Core population-doubling kernels are compiled with Numba in nopyt
 
 python YeastTelDynamics.V01.py
 
-| --num-replicates            | \# number of replicates (default 10)                                                                                          |
+| Command                     | Description                                                                                                                   |
 |-----------------------------|-------------------------------------------------------------------------------------------------------------------------------|
+| --num-replicates            | \# number of replicates (default 10)                                                                                          |
 | --del-rate                  | \# mean erosion rate per telomere per division (bp) (default 6)                                                               |
 | --Ls                        | \# telomere length senescence threshold (default 60)                                                                          |
 | --pd-max                    | \# number of PDs (default 60)                                                                                                 |
@@ -92,7 +93,7 @@ python YeastTelDynamics.V01.py
 | --init-Ys                   | \# total number of Y’ elements in initial cell (default 40), or                                                               |
 | --init-Y-file               | \# file with number of Y’s per chromosome end (32 lines)                                                                      |
 | --init-n-cells              | \# initial cells drawn from pre-evolved population per replicate (default 10)                                                 |
-| --hard-threshold            | \# maximum number of cells before next PD (default 512000; limiting cell number to \<1,024,000)                               |
+| --hard-threshold            | \# maximum number of cells before next PD (default 512000; limiting cell number to 1,024,000)                                 |
 | --hard-keep-fraction        | \# fraction of cells to keep when cells reach –hard-threshold (default 0.1)                                                   |
 | --max-freq-senesc           | \# early stop once fraction of senescent cells ≥ --max-freq-senesc (default 0.9999)                                           |
 | --subsample-pds             | \# PDs at which passages are applied (default 20 30 40 50 60)                                                                 |
@@ -165,4 +166,4 @@ Defaults applicable to HR recombination with t-circles present: -auto-seed; --de
 
 **9) Citation / acknowledgement**
 
-If you use this simulator in a publication, please cite the original article (Tsai et al. 2026) and this github repository.
+If you use this simulator in a publication, please cite the original article (Tsai et al. 2026) and this github repository [Comeron, J.M. YeastTelomereDynamics. https://github.com/josep-comeron/Yeast-Telomere-Dynamics].
