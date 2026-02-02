@@ -18,11 +18,11 @@
         -   **Die** with probability --p-sen-death, and is removed.
         -   **Attempt recombination** (if --rec-model = 1) to repair its short ends. Recombination is applied one chromosome end with \<Ls at a time.
 -   **Recombination breakpoint on the receptor end** (telomeres \<Ls):
-    -   An end has 2 constant elements (**Tel**, **X**) plus **Y’ count** copies of Y.
-    -   Resection in short telomeres (\<Ls) is assumed to be long, beyond the telomere repeat. The recombination breakpoint is chosen **uniformly** among these elements (probability = 1 / (2 + Y’ count)).
+    -   An end has 2 constant elements (**Tel**, **X**) plus **Y’ count** copies of Y. Resection in short telomeres (\<Ls) is assumed to be long, beyond the telomere repeat. The recombination breakpoint for HR is chosen **uniformly** among these elements (probability = 1 / (2 + Y’ count)).
 -   **Donor chromosome end eligibility** is set by --rec-model:
     -   0 = off (no recombination)
     -   1 = recombination can occur in senescent cells. **Only chromosome ends with telomeres ≥ Ls** **in the same cell** can be donor; if none exist in this cell, no recombination.
+    -   In a senescent cell, HR at either telomeres, Y’s, or the X element assumes that it happens between donors and resected chromosomes (\<Ls) at the same time, thus a chromosome end can only be donor and recombine with receptors once per recombination cycle.
 -   **Y’ recombination** (when a receptor Y’ element becomes “recombinant breakpoint”). Donor chromosome end is either random (among those ≥ Ls) or optionally **weighted by donor chromosome end Y’ count** (if --rec-y-weighted flag is present). If donor has multiple Y’s, one is chosen at random. Recombination between Y’ receptor and Y’ donor also causes receptor chromosome end to capture all **donor terminal Y’ elements** (if any) **and donor telomere length**.
 -   **X recombination** (when a receptor X element becomes “recombinant breakpoint”). Donor chromosome end is chosen at random (among those ≥ Ls in the same cell). Recombination at X causes receptor to capture **all** **donor Y’ elements** and **donor telomere length**.
 -   **Telomeric recombination (HR)**

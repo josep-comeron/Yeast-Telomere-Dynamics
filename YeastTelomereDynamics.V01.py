@@ -1,17 +1,17 @@
 # -*- coding: utf-8 -*-
 #!/usr/bin/env python3
+from numba import njit
+import numpy as np, math
+import sys, time, argparse, numpy as np
 
 """
-YeastTelomereDynamics — Numba
+YeastTelomereDynamics Numba
 Version: V01
 Requires numba>=0.60 and numpy>=1.26.
 """
 
-from numba import njit
-import numpy as np, math
-
 VERSION = "V01"
-PROG = f"YeastTelomereDynamics.{VERSION}.py"
+PROG = "TelomereDynamics.V01.py"
 UINT16_MAX = 65535
 N_ENDS = 32
 
@@ -53,7 +53,7 @@ def make_state_from_py_rng(py_seed: int)->np.ndarray:
 
 @njit(cache=True)
 def apply_deletions(parent_row_tel, child_row_tel, del_rate_user, state):
-    # user-visible del_rate is per telomere; kernel applies to half the ends on average
+    # del_rate is the observed (average) per telomere per division; kernel applies to half the ends 2*del_rate
     lam = 2.0 * del_rate_user
     for i in range(N_ENDS):
         if rng_int(state, 2) == 1:
@@ -69,6 +69,8 @@ def apply_deletions(parent_row_tel, child_row_tel, del_rate_user, state):
 
 @njit(cache=True)
 def pd_step_pre_symm_both_numba(tel, y, Ls, del_rate_user, state):
+    # Pre-evolution step (shared among replicates)
+    # The initial cell generates a large pop. of cells with variance in telomere lengths around initial values, within and between cells (Y's do not change)
     N = tel.shape[0]
     ncols = tel.shape[1]
     next_tel = np.empty((2*N, ncols), dtype=np.uint16)
@@ -81,26 +83,25 @@ def pd_step_pre_symm_both_numba(tel, y, Ls, del_rate_user, state):
     while pool < 2*N:
         p = rng_int(state, pool)
         ip = int(p)
-        # mutate parent symmetrically
-        for j in range(ncols):
-            k = poisson_knuth(del_rate_user, state)
-            sign = 1 if rng_int(state, 2)==1 else -1
-            v = int(next_tel[ip, j]) + sign*k
-            if v < Ls: v = Ls
-            if v > UINT16_MAX: v = UINT16_MAX
-            next_tel[ip, j] = np.uint16(v)
         # copy to child
         for j in range(ncols):
             next_tel[pool, j] = next_tel[ip, j]
             next_y  [pool, j] = next_y  [ip, j]
-        # mutate child symmetrically
+        # mutate parent and child symmetrically (50%-50% erosion or extension) to add variance (always >=Ls)
+        lam = 2.0 * del_rate_user
         for j in range(ncols):
-            k = poisson_knuth(del_rate_user, state)
-            sign = 1 if rng_int(state, 2)==1 else -1
-            v = int(next_tel[pool, j]) + sign*k
-            if v < Ls: v = Ls
-            if v > UINT16_MAX: v = UINT16_MAX
-            next_tel[pool, j] = np.uint16(v)
+            if rng_int(state, 2) == 1:
+                k = poisson_knuth(lam, state)
+                sign = 1 if rng_int(state, 2)==1 else -1
+                v = int(next_tel[ip, j]) + sign*k
+                if v < Ls: v = Ls
+                next_tel[ip, j] = np.uint16(v)
+            if rng_int(state, 2) == 1:
+                k = poisson_knuth(lam, state)
+                sign = 1 if rng_int(state, 2)==1 else -1
+                v = int(next_tel[pool, j]) + sign*k
+                if v < Ls: v = Ls
+                next_tel[pool, j] = np.uint16(v)
         pool += 1
     out_tel = np.empty((pool, ncols), dtype=np.uint16)
     out_y   = np.empty((pool, ncols), dtype=np.uint16)
@@ -111,218 +112,341 @@ def pd_step_pre_symm_both_numba(tel, y, Ls, del_rate_user, state):
     return pool, out_tel, out_y
 
 @njit(cache=True)
-def pick_uniform_eligible(row_tel, row_y, Ls, eff_model, r, require_y_ge1, state)->int:
-    n = row_tel.shape[0]
-    cnt = 0
-    for i in range(n):
-        if i == r: continue
-        if eff_model == 1 and row_tel[i] < Ls: continue
-        if require_y_ge1 == 1 and row_y[i] == 0: continue
-        cnt += 1
-    if cnt == 0: return -1
-    step = rng_int(state, cnt)
-    acc = 0
-    for i in range(n):
-        if i == r: continue
-        if eff_model == 1 and row_tel[i] < Ls: continue
-        if require_y_ge1 == 1 and row_y[i] == 0: continue
-        if acc == step: return i
-        acc += 1
-    return -1
-
-@njit(cache=True)
-def pick_weighted_donor(row_tel, Ls, eff_model, r, state)->int:
-    n = row_tel.shape[0]
-    tot = 0
-    for i in range(n):
-        if i == r: continue
-        v = int(row_tel[i])
-        if eff_model == 1 and v < Ls: v = 0
-        if v > 0: tot += v
-    if tot <= 0:
-        z = np.zeros(n, dtype=np.uint16)
-        return pick_uniform_eligible(row_tel, z, Ls, eff_model, r, 0, state)
-    rint = rng_int(state, tot)
-    acc = 0
-    for i in range(n):
-        if i == r: continue
-        v = int(row_tel[i])
-        if eff_model == 1 and v < Ls: v = 0
-        if v <= 0: continue
-        acc += v
-        if rint < acc: return i
-    return -1
-
-@njit(cache=True)
-def pick_max_donor(row_tel, Ls, eff_model, r)->int:
-    n = row_tel.shape[0]
-    best = -1
-    bestv = -1
-    for i in range(n):
-        if i == r: continue
-        v = int(row_tel[i])
-        if eff_model == 1 and v < Ls: continue
-        if v > bestv:
-            bestv = v; best = i
-    return best
-
-@njit(cache=True)
-def pick_y_donor_weighted_by_count(row_tel, row_y, Ls, eff_model, r, state):
-    n = row_tel.shape[0]
-    tot = 0
-    for i in range(n):
-        if i == r: continue
-        if eff_model == 1 and row_tel[i] < Ls: continue
-        yi = int(row_y[i])
-        if yi > 0: tot += yi
-    if tot <= 0: return -1, -1
-    rint = rng_int(state, tot)
-    acc = 0
-    pick = -1
-    for i in range(n):
-        if i == r: continue
-        if eff_model == 1 and row_tel[i] < Ls: continue
-        yi = int(row_y[i])
-        if yi <= 0: continue
-        acc += yi
-        if rint < acc:
-            pick = i; break
-    if pick < 0: return -1, -1
-    yi = int(row_y[pick])
-    dj1 = rng_int(state, yi) + 1
-    return pick, dj1
-
-@njit(cache=True)
 def recombine_cell(row_tel, row_y, Ls, rec_model, rec_y_weighted, donor_mode,
-                   rec_tel_mode, prob_circle_cell, circle_len, prob_ts,
-                   min_len_circle_gen, prob_each_circle, dynamic_circles, p_circle_row,
-                   max_Ys, state):
+                   rec_tel_mode, prob_circle, circle_len, prob_ts,
+                   min_len_circle_gen, prob_each_circle,
+                   dynamic_circles, p_circle_view, max_Ys, state):
+
+    # If rec_model==1 (recombination allowed):
+    # Recombination can occur in senescent cells.
+    # All chromosome ends with telomere <Ls (receptors) can attempt recombination with elegible donor chromosome ends (different than receptor). 
+    # Elegible donor chromosome ends must have telomere length >= Ls. If a cell has no ends >= Ls, it cannot recombine.
+    # TS (template switching) can occur after a receptor has recombined with a donor (telomere, Y' or X), with multiple possible 'jumps' or 'hops' to a different elegible telomere donor.
+ 
     if rec_model == 0:
         return
-    n = row_tel.shape[0]
-    eff_model = 1 if rec_model == 1 else 0  # 1: donors must be >= Ls; 0: any
-    if eff_model == 1:
-        any_ge = False
-        for i in range(n):
-            if row_tel[i] >= Ls:
-                any_ge = True; break
-        if not any_ge:
+
+    ncols = row_tel.shape[0]
+
+    # If there is no possible donor in this cell, skip recombination entirely
+    has_ge = False
+    for j in range(ncols):
+        if row_tel[j] >= Ls:
+            has_ge = True
+            break
+    if not has_ge:
+        return
+
+    def add_circle_if_eligible(new_tel_val):
+        if dynamic_circles == 1 and new_tel_val >= min_len_circle_gen:
+            pc = p_circle_view[0] + prob_each_circle
+            if pc > 1.0:
+                pc = 1.0
+            p_circle_view[0] = pc
+
+    def count_eligible_hr(exclude_idx, require_y_ge1):
+        c = 0
+        for j in range(ncols):
+            if j == exclude_idx:
+                continue
+            if row_tel[j] < Ls:
+                continue
+            if require_y_ge1 == 1 and row_y[j] < 1:
+                continue
+            c += 1
+        return c
+
+    def choose_donor_hr_X_rndY(exclude_idx,require_y_ge1):
+        # uniform among eligible (>=Ls; no receptor; any for X rec, >0 Ys for Y' rec) 
+        c = count_eligible_hr(exclude_idx, require_y_ge1)
+        if c <= 0:
+            return -1
+        k = int(rng_int(state, c))
+        acc = 0
+        for j in range(ncols):
+            if j == exclude_idx:
+                continue
+            if row_tel[j] < Ls:
+                continue
+            if require_y_ge1 == 1 and row_y[j] < 1:
+                continue
+            if acc == k:
+                return j
+            acc += 1
+        return -1
+
+    def choose_donor_hr_wY(exclude_idx,require_y_ge1):
+        # donor weighted based on number of Ys among elegible (>=Ls; no receptor, >0 Ys for Y' rec)
+        c = count_eligible_hr(exclude_idx, require_y_ge1)
+        if c <= 0:
+            return -1
+        tot = 0
+        for j in range(ncols):
+            if j == exclude_idx:
+                continue
+            if row_tel[j] < Ls:
+                continue
+            if require_y_ge1 == 1 and row_y[j] < 1:
+                continue
+            yi = int(row_y[j])
+            if yi > 0: tot += yi
+        if tot <= 0: return -1
+        rint = rng_int(state, tot)
+        acc = 0
+        for j in range(ncols):
+            if j == exclude_idx:
+                continue
+            if row_tel[j] < Ls:
+                continue
+            if require_y_ge1 == 1 and row_y[j] < 1:
+                continue
+            yi = int(row_y[j])
+            if yi > 0: acc += yi
+            if rint < acc:
+                return j
+        return -1
+
+    def choose_donor_hr_tel(exclude_idx):
+        # Eligible HR donors: tel>=Ls, Y'>=1 optional if rec is at Y', and not the receptor.
+        if donor_mode == 2:
+            best = -1
+            bestv = -1
+            for j in range(ncols):
+                if j == exclude_idx:
+                    continue
+                if row_tel[j] < Ls:
+                    continue
+                v = int(row_tel[j])
+                if v > bestv:
+                    bestv = v
+                    best = j
+            return best
+
+        if donor_mode == 1:
+            S = 0
+            for j in range(ncols):
+                if j == exclude_idx:
+                    continue
+                if row_tel[j] < Ls:
+                    continue
+                S += int(row_tel[j])
+            if S <= 0:
+                return -1
+            r = int(rng_int(state, S))
+            acc = 0
+            for j in range(ncols):
+                if j == exclude_idx:
+                    continue
+                if row_tel[j] < Ls:
+                    continue
+                acc += int(row_tel[j])
+                if r < acc:
+                    return j
+            return -1
+
+        # donor_mode == 0: uniform among eligible
+        c = count_eligible_hr(exclude_idx, 0)
+        if c <= 0:
+            return -1
+        k = int(rng_int(state, c))
+        acc = 0
+        for j in range(ncols):
+            if j == exclude_idx:
+                continue
+            if row_tel[j] < Ls:
+                continue
+            if acc == k:
+                return j
+            acc += 1
+        return -1
+
+    def count_eligible_ts(exclude_idx, last_donor):
+        c = 0
+        for j in range(ncols):
+            if j == exclude_idx:
+                continue
+            if j == last_donor:
+                continue
+            if row_tel[j] < Ls:
+                continue
+            c += 1
+        return c
+
+    def choose_donor_ts(exclude_idx, last_donor):
+        # Eligible telomere TS donors: tel>=Ls, not receptor, not last used donor 
+        if donor_mode == 2:
+            best = -1
+            bestv = -1
+            for j in range(ncols):
+                if j == exclude_idx or j == last_donor:
+                    continue
+                if row_tel[j] < Ls:
+                    continue
+                v = int(row_tel[j])
+                if v > bestv:
+                    bestv = v
+                    best = j
+            return best
+
+        if donor_mode == 1:
+            S = 0
+            for j in range(ncols):
+                if j == exclude_idx or j == last_donor:
+                    continue
+                if row_tel[j] < Ls:
+                    continue
+                S += int(row_tel[j])
+            if S <= 0:
+                return -1
+            r = int(rng_int(state, S))
+            acc = 0
+            for j in range(ncols):
+                if j == exclude_idx or j == last_donor:
+                    continue
+                if row_tel[j] < Ls:
+                    continue
+                acc += int(row_tel[j])
+                if r < acc:
+                    return j
+            return -1
+
+        c = count_eligible_ts(exclude_idx, last_donor)
+        if c <= 0:
+            return -1
+        k = int(rng_int(state, c))
+        acc = 0
+        for j in range(ncols):
+            if j == exclude_idx or j == last_donor:
+                continue
+            if row_tel[j] < Ls:
+                continue
+            if acc == k:
+                return j
+            acc += 1
+        return -1
+
+    def recombine_ts(idx, last_donor):
+      # TS hops (up to 5)
+        hops = 0
+        while hops < 5 and rng_uniform01(state) < prob_ts:
+            d2 = choose_donor_ts(idx, last_donor)
+            if d2 < 0:
+                break
+            last_donor = d2
+            TelD2 = int(row_tel[d2])
+            rR2 = int(row_tel[idx])
+            rD2 = int(rng_int(state, TelD2 + 1))
+            new_tel = rR2 + (TelD2 - rD2)
+            if new_tel < 0:
+                new_tel = 0
+            if new_tel > 65535:
+                new_tel = 65535
+            row_tel[idx] = np.uint16(new_tel)
+            hops += 1
+        return
+
+    def recombine_one_end(idx):
+        # Circle recombination first
+        if prob_circle > 0.0 and rng_uniform01(state) < prob_circle:
+            new_tel = int(row_tel[idx]) + int(circle_len)
+            if new_tel > 65535:
+                new_tel = 65535
+            row_tel[idx] = np.uint16(new_tel)
             return
 
-    for r in range(n):
-        if row_tel[r] >= Ls:
-            continue
-        ycnt = int(row_y[r])
-        total = 3 + ycnt
-        k = rng_int(state, total)
-        if k == 0:
-            # Telomere recombination; first consider circles
-            if prob_circle_cell > 0.0 and rng_uniform01(state) < prob_circle_cell:
-                new_tel = int(row_tel[r]) + int(circle_len)
-                if new_tel > UINT16_MAX: new_tel = UINT16_MAX
-                row_tel[r] = np.uint16(new_tel)
-                if new_tel >= min_len_circle_gen and dynamic_circles == 1:
-                    p = float(p_circle_row[0]) + float(prob_each_circle)
-                    if p > 1.0: p = 1.0
-                    p_circle_row[0] = p
-                continue
-            # otherwise choose donor per donor_mode
-            if donor_mode == 2:
-                d = pick_max_donor(row_tel, Ls, eff_model, r)
-            elif donor_mode == 1:
-                d = pick_weighted_donor(row_tel, Ls, eff_model, r, state)
+        # Chose what element of eroded chromosome end recombines (tel, one of the Y's or X)
+        ycnt = int(row_y[idx])
+        total = 2 + ycnt  # Tel + Ys + X
+        pick = int(rng_int(state, total))
+
+        if pick == 0:
+            # HR telomere recombination
+            d = choose_donor_hr_tel(idx)
+            if d < 0:
+                return
+            last_donor = d
+
+            TelR = int(row_tel[idx])
+            TelD = int(row_tel[d])
+
+            if rec_tel_mode == 2:
+                rR = TelR
+                rD = int(rng_int(state, TelD + 1))
+            elif rec_tel_mode == 1:
+                rR = int(rng_int(state, TelR + 1))
+                rD = int(rng_int(state, TelD + 1))
             else:
-                z = np.zeros(n, dtype=np.uint16)
-                d = pick_uniform_eligible(row_tel, z, Ls, eff_model, r, 0, state)
-            if d < 0: continue
-            TelR_old = int(row_tel[r]); TelD = int(row_tel[d])
-            if rec_tel_mode == 0:      # copy
-                rR = 0; rD = 0
-            elif rec_tel_mode == 2:    # end
-                rR = TelR_old; rD = rng_int(state, TelD+1)
-            else:                      # rnd
-                rR = rng_int(state, TelR_old+1); rD = rng_int(state, TelD+1)
+                rR = 0
+                rD = 0
+
             new_tel = rR + (TelD - rD)
-            if new_tel < 0: new_tel = 0
-            if new_tel > UINT16_MAX: new_tel = UINT16_MAX
-            row_tel[r] = np.uint16(new_tel)
-            if new_tel >= min_len_circle_gen and dynamic_circles == 1:
-                p = float(p_circle_row[0]) + float(prob_each_circle)
-                if p > 1.0: p = 1.0
-                p_circle_row[0] = p
-            # template switching
-            if prob_ts > 0.0:
-                last_d = d
-                for _ in range(5):
-                    if rng_uniform01(state) >= prob_ts: break
-                    cnt = 0
-                    for i in range(n):
-                        if i == r or i == last_d: continue
-                        if eff_model == 1 and row_tel[i] < Ls: continue
-                        cnt += 1
-                    if cnt == 0: break
-                    step = rng_int(state, cnt)
-                    acc = 0; nd = -1
-                    for i in range(n):
-                        if i == r or i == last_d: continue
-                        if eff_model == 1 and row_tel[i] < Ls: continue
-                        if acc == step: nd = i; break
-                        acc += 1
-                    if nd < 0: break
-                    TelR_old = int(row_tel[r]); TelD = int(row_tel[nd])
-                    rR = TelR_old; rD = rng_int(state, TelD+1)   # TS always 'end' on receptor
-                    new_tel = rR + (TelD - rD)
-                    if new_tel < 0: new_tel = 0
-                    if new_tel > UINT16_MAX: new_tel = UINT16_MAX
-                    row_tel[r] = np.uint16(new_tel)
-                    if new_tel >= min_len_circle_gen and dynamic_circles == 1:
-                        p = float(p_circle_row[0]) + float(prob_each_circle)
-                        if p > 1.0: p = 1.0
-                        p_circle_row[0] = p
-                    last_d = nd
-        elif k == 1:
-            # X: copy tel length only
-            d = pick_uniform_eligible(row_tel, row_y, Ls, eff_model, r, 0, state)
-            if d >= 0:
-                row_tel[r] = row_tel[d]
-        elif k == 2:
-            # C: copy tel length and Y-count
-            d = pick_uniform_eligible(row_tel, row_y, Ls, eff_model, r, 0, state)
-            if d >= 0:
-                row_tel[r] = row_tel[d]
-                yy = int(row_y[d])
-                if yy < 0: yy = 0
-                if yy > max_Ys: yy = max_Ys
-                row_y[r]   = np.uint16(yy)
-        else:
-            # Y recombination
-            if ycnt <= 0: 
-                continue
-            rec_i = k - 2
+            if new_tel < 0:
+                new_tel = 0
+            if new_tel > 65535:
+                new_tel = 65535
+            row_tel[idx] = np.uint16(new_tel)
+
+            # TS hops
+            recombine_ts(idx,last_donor)
+
+            # Add circles to this cell if dynamic-circles 
+            add_circle_if_eligible(int(row_tel[idx]))
+            return
+
+        if pick <= ycnt:
+            # Y recombination: HR donor must have at least one Y'
             if rec_y_weighted == 1:
-                d, dj1 = pick_y_donor_weighted_by_count(row_tel, row_y, Ls, eff_model, r, state)
-                if d >= 0:
-                    donor_y = int(row_y[d])
-                    new_y = rec_i + (donor_y - int(dj1))
-                    if new_y < 0: new_y = 0
-                    if new_y > max_Ys: new_y = max_Ys
-                    row_y[r] = np.uint16(new_y)
-                    row_tel[r] = row_tel[d]
+                d = choose_donor_hr_wY(idx, 1)
             else:
-                d = pick_uniform_eligible(row_tel, row_y, Ls, eff_model, r, 1, state)
-                if d >= 0 and row_y[d] >= 1:
-                    donor_y = int(row_y[d])
-                    dj0 = rng_int(state, donor_y); dj1 = dj0 + 1
-                    new_y = rec_i + (donor_y - int(dj1))
-                    if new_y < 0: new_y = 0
-                    if new_y > max_Ys: new_y = max_Ys
-                    row_y[r] = np.uint16(new_y)
-                    row_tel[r] = row_tel[d]
+                d = choose_donor_hr_X_rndY(idx, 1)
+            if d < 0:
+                return
+            last_donor = d
 
+            y_donor_cnt = int(row_y[d])
+            if y_donor_cnt <= 0:
+                return
+            yk = int(rng_int(state, y_donor_cnt))
+            y_rec_idx = pick - 1
+            new_y = (y_rec_idx + 1) + (y_donor_cnt - yk)
+            if new_y < 0:
+                new_y = 0
+            if new_y > max_Ys:
+                new_y = max_Ys
+            row_y[idx] = np.uint16(new_y)
+            row_tel[idx] = np.uint16(row_tel[d])
 
+            # TS hops
+            recombine_ts(idx,last_donor)
+
+            # Add circles to this cell if dynamic-circles 
+            add_circle_if_eligible(int(row_tel[idx]))
+            return
+
+        # X recombination
+        d = choose_donor_hr_X_rndY(idx, 0)
+        if d < 0:
+            return
+        last_donor = d
+        row_tel[idx] = np.uint16(row_tel[d])
+        yy = int(row_y[d])
+        if yy > max_Ys:
+            yy = max_Ys
+        row_y[idx] = np.uint16(yy)
+
+        # TS hops
+        recombine_ts(idx,last_donor)
+
+        # Add circles to this cell if dynamic-circles 
+        add_circle_if_eligible(int(row_tel[idx]))
+        return
+
+    for i in range(ncols):
+        if row_tel[i] < Ls:
+            recombine_one_end(i)
 
 @njit(cache=True)
-def pd_step_numba(tel, y, p_circle, Ls, del_rate_user,
+def pd_step(tel, y, p_circle, Ls, del_rate_user,
                   rec_model, rec_y_weighted, donor_mode,
                   rec_tel_mode, prob_circle_global, circle_len,
                   prob_ts, p_sen_death, min_len_circle_gen, prob_each_circle,
@@ -330,160 +454,93 @@ def pd_step_numba(tel, y, p_circle, Ls, del_rate_user,
     N = tel.shape[0]
     ncols = tel.shape[1]
 
-    if N == 0:
+    # Any non-senescent (dividers) in the pop.? Stop if False 
+    has_divider = False
+    for i in range(N):
+        ok = True
+        for j in range(ncols):
+            if tel[i, j] < Ls:
+                ok = False
+                break
+        if ok:
+            has_divider = True
+            break
+    if (N == 0) or (not has_divider):
         return N, tel, y, p_circle
 
-    # Preallocate next generation buffers
     next_tel = np.empty((2*N, ncols), dtype=np.uint16)
     next_y   = np.empty((2*N, ncols), dtype=np.uint16)
     next_pc  = np.empty((2*N,), dtype=np.float32)
-
-    # Copy current pool
     for i in range(N):
         for j in range(ncols):
             next_tel[i, j] = tel[i, j]
-            next_y  [i, j] = y[i, j]
+            next_y[i, j]   = y[i, j]
         next_pc[i] = p_circle[i]
 
     pool = int(N)
-
-    # ===== FAST PATH: NO RECOMBINATION ======================================
-    if rec_model == 0:
-        # Build initial list of dividers in [0 .. pool-1]
-        div_idx = np.empty(pool, dtype=np.int32)
-        div_count = 0
-        for i in range(pool):
-            ok = True
-            for j in range(ncols):
-                if next_tel[i, j] < Ls:
-                    ok = False
-                    break
-            if ok:
-                div_idx[div_count] = i
-                div_count += 1
-
-        if div_count == 0:
-            # No dividers -> PD ends immediately
-            out_tel = np.empty((pool, ncols), dtype=np.uint16)
-            out_y   = np.empty((pool, ncols), dtype=np.uint16)
-            out_pc  = np.empty((pool,), dtype=np.float32)
-            for i in range(pool):
-                for j in range(ncols):
-                    out_tel[i, j] = next_tel[i, j]
-                    out_y  [i, j] = next_y  [i, j]
-                out_pc[i] = next_pc[i]
-            return pool, out_tel, out_y, out_pc
-
-        while pool < 2*N:
-            if div_count == 0:
-                break  # cannot create more children in this PD
-
-            # Pick a divider parent uniformly
-            k  = int(rng_int(state, div_count))
-            ip = int(div_idx[k])
-
-            # Child starts as a copy of parent
-            for j in range(ncols):
-                next_tel[pool, j] = next_tel[ip, j]
-                next_y  [pool, j] = next_y  [ip, j]
-            # Split circles between parent and child
-            next_pc[pool] = next_pc[ip] * 0.5
-            next_pc[ip]   *= 0.5
-
-            # Apply deletions to both parent (in-place) and child
-            apply_deletions(next_tel[ip], next_tel[pool], del_rate_user, state)
-
-            # Update the divider list for the parent
-            parent_div = True
-            for j in range(ncols):
-                if next_tel[ip, j] < Ls:
-                    parent_div = False
-                    break
-            if not parent_div:
-                last = div_count - 1
-                if k != last:
-                    div_idx[k] = div_idx[last]
-                div_count -= 1
-
-            # If child is a divider, append to list
-            child_div = True
-            for j in range(ncols):
-                if next_tel[pool, j] < Ls:
-                    child_div = False
-                    break
-            if child_div:
-                if div_count < div_idx.shape[0]:
-                    div_idx[div_count] = int(pool)
-                    div_count += 1
-
-            pool += 1
-
-        # Finalize
-        out_tel = np.empty((pool, ncols), dtype=np.uint16)
-        out_y   = np.empty((pool, ncols), dtype=np.uint16)
-        out_pc  = np.empty((pool,), dtype=np.float32)
-        for i in range(pool):
-            for j in range(ncols):
-                out_tel[i, j] = next_tel[i, j]
-                out_y  [i, j] = next_y  [i, j]
-            out_pc[i] = next_pc[i]
-        return pool, out_tel, out_y, out_pc
-
-    # ===== GENERAL PATH: RECOMBINATION ALLOWED ===============================
     while pool < 2*N:
         if pool == 0:
             break
+        p = rng_int(state, pool)
+        ip = int(p)
 
-        ip = int(rng_int(state, pool))
-        ip_i = int(ip)
-
-        # Is parent senescent?
-        can_divide = True
+        alive = True
         for j in range(ncols):
-            if next_tel[ip_i, j] < Ls:
-                can_divide = False
+            if next_tel[ip, j] < Ls:
+                alive = False
                 break
 
-        if not can_divide:
-            # Optional death of senescent parent
+        if not alive:
             if p_sen_death > 0.0 and rng_uniform01(state) < p_sen_death:
                 last = pool - 1
                 for j in range(ncols):
-                    tmp  = next_tel[ip_i, j]; next_tel[ip_i, j] = next_tel[last, j]; next_tel[last, j] = tmp
-                    tmp2 = next_y  [ip_i, j]; next_y  [ip_i, j] = next_y  [last, j]; next_y  [last, j] = tmp2
-                tmp3 = next_pc[ip_i]; next_pc[ip_i] = next_pc[last]; next_pc[last] = tmp3
+                    tmp  = next_tel[ip, j]; next_tel[ip, j] = next_tel[last, j]; next_tel[last, j] = tmp
+                    tmp2 = next_y  [ip, j]; next_y  [ip, j] = next_y  [last, j]; next_y  [last, j] = tmp2
+                tmp3 = next_pc[ip]; next_pc[ip] = next_pc[last]; next_pc[last] = tmp3
                 pool -= 1
                 continue
 
-            # Try to rescue by recombination
-            pc = next_pc[ip_i] if dynamic_circles == 1 else prob_circle_global
-            recombine_cell(next_tel[ip_i], next_y[ip_i], Ls, rec_model, rec_y_weighted, donor_mode,
-                           rec_tel_mode, pc, circle_len, prob_ts,
-                           min_len_circle_gen, prob_each_circle,
-                           dynamic_circles, next_pc[ip_i:ip_i+1], max_Ys, state)
-
-            # Re-check if it can now divide
-            can_divide = True
-            for j in range(ncols):
-                if next_tel[ip_i, j] < Ls:
-                    can_divide = False
+            if rec_model != 0:
+                pc = next_pc[ip] if dynamic_circles == 1 else prob_circle_global
+                recombine_cell(next_tel[ip], next_y[ip], Ls, rec_model, rec_y_weighted, donor_mode,
+                               rec_tel_mode, pc, circle_len, prob_ts,
+                               min_len_circle_gen, prob_each_circle,
+                               dynamic_circles, next_pc[ip:ip+1], max_Ys, state)
+                can_divide = True
+                for j in range(ncols):
+                    if next_tel[ip, j] < Ls:
+                        can_divide = False
+                        break
+                if not can_divide:
+                    continue
+            else:
+                # anti-stall: scan current pool for any divider; if none, bail
+                has_divider_now = False
+                for ii in range(pool):
+                    ok_now = True
+                    for jj in range(ncols):
+                        if next_tel[ii, jj] < Ls:
+                            ok_now = False
+                            break
+                    if ok_now:
+                        has_divider_now = True
+                        break
+                if not has_divider_now:
                     break
-            if not can_divide:
-                continue  # still senescent; try another parent
+                continue
 
-        # Spawn child from dividing parent
+        # generate child
         for j in range(ncols):
-            next_tel[pool, j] = next_tel[ip_i, j]
-            next_y  [pool, j] = next_y  [ip_i, j]
-        # split circles
-        next_pc[pool] = next_pc[ip_i] * 0.5
-        next_pc[ip_i] *= 0.5
+            next_tel[pool, j] = next_tel[ip, j]
+            next_y  [pool, j] = next_y  [ip, j]
+        # circle number split at division
+        next_pc[pool] = next_pc[ip] * 0.5
+        next_pc[ip]   *= 0.5
         # deletions to both parent and child
-        apply_deletions(next_tel[ip_i], next_tel[pool], del_rate_user, state)
+        apply_deletions(next_tel[ip], next_tel[pool], del_rate_user, state)
 
         pool += 1
 
-    # Finalize
     out_tel = np.empty((pool, ncols), dtype=np.uint16)
     out_y   = np.empty((pool, ncols), dtype=np.uint16)
     out_pc  = np.empty((pool,), dtype=np.float32)
@@ -493,9 +550,6 @@ def pd_step_numba(tel, y, p_circle, Ls, del_rate_user,
             out_y  [i, j] = next_y  [i, j]
         out_pc[i] = next_pc[i]
     return pool, out_tel, out_y, out_pc
-
-
-import sys, time, argparse, numpy as np
 
 def q5set(a: np.ndarray):
     if a.size == 0: return (np.nan,)*5
@@ -524,12 +578,13 @@ def pre_evolve_numba(init_tel, init_y, pd_pre, del_rate_user, Ls,
         if tel.shape[0] == 0: break
     return tel, y
 
-def compute_metrics_py(tel: np.ndarray, y: np.ndarray, Ls: int):
+def compute_metrics_py(tel: np.ndarray, y: np.ndarray, p_circle: np.ndarray, Ls: int, prob_each_circle: float, dynamic_circles: bool):
     N = int(tel.shape[0])
     if N == 0:
         return dict(N_cells=0, frac_senescent=1.0,
                     tel_mean=np.nan, tel_p5=np.nan, tel_p10=np.nan, tel_p50=np.nan, tel_p90=np.nan, tel_p95=np.nan,
-                    y_mean=np.nan, y_p5=np.nan, y_p10=np.nan, y_p50=np.nan, y_p90=np.nan, y_p95=np.nan)
+                    y_mean=np.nan, y_p5=np.nan, y_p10=np.nan, y_p50=np.nan, y_p90=np.nan, y_p95=np.nan,
+                    avg_circles_per_cell=np.nan)
     sen_mask = (tel < Ls).any(axis=1)
     frac_sen = float(np.mean(sen_mask))
     flat_tel = tel.reshape(-1).astype(np.float64)
@@ -538,14 +593,19 @@ def compute_metrics_py(tel: np.ndarray, y: np.ndarray, Ls: int):
     y_sum = y.sum(axis=1).astype(np.float64)
     y_mean = float(np.mean(y_sum))
     y_p5, y_p10, y_p50, y_p90, y_p95 = q5set(y_sum)
+    if dynamic_circles and prob_each_circle > 0.0:
+        avg_circles = float(np.mean(p_circle[:N].astype(np.float64))) / float(prob_each_circle)
+    else:
+        avg_circles = np.nan
     return dict(N_cells=N, frac_senescent=frac_sen,
                 tel_mean=tel_mean, tel_p5=tel_p5, tel_p10=tel_p10, tel_p50=tel_p50, tel_p90=tel_p90, tel_p95=tel_p95,
-                y_mean=y_mean, y_p5=y_p5, y_p10=y_p10, y_p50=y_p50, y_p90=y_p90, y_p95=y_p95)
+                y_mean=y_mean, y_p5=y_p5, y_p10=y_p10, y_p50=y_p50, y_p90=y_p90, y_p95=y_p95,
+                avg_circles_per_cell=avg_circles)
 
 def write_replicate_blocks(matrix, out_prefix, num_replicates):
     metrics = ["N_cells","frac_senescent",
                "tel_mean","tel_p5","tel_p10","tel_p50","tel_p90","tel_p95",
-               "y_mean","y_p5","y_p10","y_p50","y_p90","y_p95"]
+               "y_mean","y_p5","y_p10","y_p50","y_p90","y_p95","avg_circles_per_cell"]
     max_pd = max(r['PD'] for rep in matrix for r in rep if r['PD'] is not None)
     path = f"{out_prefix}.replicates.tsv"
     with open(path, "w") as f:
@@ -564,7 +624,7 @@ def write_replicate_blocks(matrix, out_prefix, num_replicates):
                     for r in rep_rows:
                         if r["PD"] == pd:
                             match = r; break
-                    row_vals.append("NA" if match is None else fmt(match[metric]))
+                    row_vals.append("NA" if match is None else fmt(match.get(metric, float("nan"))))
                 f.write("\t".join(row_vals) + "\n")
             f.write("\n")
 
@@ -583,7 +643,7 @@ def simulate_once(pd_max, del_rate_user, Ls, rec_model, rec_y_weighted, donor_mo
     else:
         p_circle = np.full((tel.shape[0],), float(prob_circle), dtype=np.float32)
     rows = []
-    m = compute_metrics_py(tel, y, Ls); m["PD"]=0
+    m = compute_metrics_py(tel, y, p_circle, Ls, prob_each_circle, dynamic_circles); m["PD"]=0
     if m["frac_senescent"] >= max_freq_senesc:
         m["frac_senescent"] = 1.0; rows.append(m); return rows
     rows.append(m)
@@ -593,7 +653,7 @@ def simulate_once(pd_max, del_rate_user, Ls, rec_model, rec_y_weighted, donor_mo
             idx = rng.choice(tel.shape[0], size=keep, replace=False)
             tel = tel[idx].copy(); y = y[idx].copy(); p_circle = p_circle[idx].copy()
         state = make_state_from_py_rng(int(rng.integers(0, 2**31-1)))
-        pool, tel, y, p_circle = pd_step_numba(tel, y, p_circle, Ls, del_rate_user,
+        pool, tel, y, p_circle = pd_step(tel, y, p_circle, Ls, del_rate_user,
                                                rec_model, 1 if rec_y_weighted else 0, donor_mode, rec_tel_mode,
                                                prob_circle, circle_len, prob_ts, p_sen_death,
                                                min_len_circle_gen, prob_each_circle,
@@ -601,7 +661,7 @@ def simulate_once(pd_max, del_rate_user, Ls, rec_model, rec_y_weighted, donor_mo
         if pd in subsample_pds and pool > subsample_size:
             idx = rng.choice(pool, size=subsample_size, replace=False)
             tel = tel[idx].copy(); y = y[idx].copy(); p_circle = p_circle[idx].copy(); pool = subsample_size
-        m = compute_metrics_py(tel, y, Ls); m["PD"]=pd
+        m = compute_metrics_py(tel, y, p_circle, Ls, prob_each_circle, dynamic_circles); m["PD"]=pd
         if m["frac_senescent"] >= max_freq_senesc:
             m["frac_senescent"] = 1.0; rows.append(m); break
         rows.append(m)
@@ -617,11 +677,12 @@ def run_replicates_serial(num_replicates, seed, auto_seed,
                           hard_threshold, hard_keep_fraction,
                           subsample_pds, subsample_size, out_prefix, max_Ys):
     t0 = time.time()
-    # RNG
+    # base RNG
     if seed is not None: base_rng = np.random.default_rng(seed)
     elif auto_seed:      base_rng = np.random.default_rng(np.random.SeedSequence().entropy)
     else:                base_rng = np.random.default_rng()
-    # init tel
+
+    # Generation of initial tel lengths
     if init_len is not None:
         rng_tmp = np.random.default_rng(base_rng.integers(0, 2**31-1))
         tel0 = rng_tmp.poisson(init_len, size=N_ENDS).astype(np.int64)
@@ -633,7 +694,8 @@ def run_replicates_serial(num_replicates, seed, auto_seed,
         tel0 = np.array([max(Ls, min(int(v), UINT16_MAX)) for v in vals], dtype=np.uint16)
     else:
         tel0 = np.full(N_ENDS, max(Ls, 225), dtype=np.uint16)
-    # init Ys
+
+    # Generation of initial Ys number and distribution
     if init_Y_file:
         vals = [int(x.strip()) for x in open(init_Y_file) if x.strip()]
         if len(vals) != N_ENDS:
@@ -648,7 +710,8 @@ def run_replicates_serial(num_replicates, seed, auto_seed,
             y0 = counts.astype(np.uint16)
         else:
             y0 = np.zeros(N_ENDS, dtype=np.uint16)
-    # pre-evo
+    
+    # pre-evolution step (once, shared for all replicates)
     rng_pre = np.random.default_rng(base_rng.integers(0, 2**31-1))
     tel_pre, y_pre = pre_evolve_numba(tel0, y0, pd_pre, del_rate_user, Ls,
                                       hard_threshold, hard_keep_fraction, rng_pre)
@@ -667,11 +730,12 @@ def run_replicates_serial(num_replicates, seed, auto_seed,
 
     # outputs
     write_replicate_blocks(matrix, out_prefix, num_replicates)
+
     # summary
     max_pd = max(r['PD'] for rep in matrix for r in rep if r['PD'] is not None)
     metrics = ["N_cells","frac_senescent",
                "tel_mean","tel_p5","tel_p10","tel_p50","tel_p90","tel_p95",
-               "y_mean","y_p5","y_p10","y_p50","y_p90","y_p95"]
+               "y_mean","y_p5","y_p10","y_p50","y_p90","y_p95","avg_circles_per_cell"]
     summary = []
     for pd in range(0, max_pd+1):
         agg = {"PD": pd}
@@ -680,19 +744,22 @@ def run_replicates_serial(num_replicates, seed, auto_seed,
             for rep_rows in matrix:
                 for r in rep_rows:
                     if r["PD"] == pd:
-                        vals.append(r[m]); break
+                        vals.append(r.get(m, float("nan"))); break
             arr = np.array(vals, dtype=float)
-            agg[m] = float(np.nanmean(arr)) if arr.size else np.nan
+            if arr.size == 0 or not np.isfinite(arr).any():
+                agg[m] = np.nan
+            else:
+                agg[m] = float(np.nanmean(arr))
         summary.append(agg)
     wall = time.time() - t0
     with open(f"{out_prefix}.summary.tsv", "w") as f:
         f.write(f"# Program: {PROG}\n# Version: {VERSION}\n# Command: {' '.join(map(str, sys.argv))}\n")
         f.write("# WallTimeSeconds: %.6f\n" % wall)
-        f.write("PD\tN_cells\tfrac_senescent\ttel_mean\ttel_p5\ttel_p10\ttel_p50\ttel_p90\ttel_p95\ty_mean\ty_p5\ty_p10\ty_p50\ty_p90\ty_p95\n")
+        f.write("PD	N_cells	frac_senescent	tel_mean	tel_p5	tel_p10	tel_p50	tel_p90	tel_p95	y_mean	y_p5	y_p10	y_p50	y_p90	y_p95	avg_circles_per_cell\n")
         for r in summary:
             f.write(f"{r['PD']}\t{r['N_cells']}\t{r['frac_senescent']}"
                     f"\t{r['tel_mean']}\t{r['tel_p5']}\t{r['tel_p10']}\t{r['tel_p50']}\t{r['tel_p90']}\t{r['tel_p95']}"
-                    f"\t{r['y_mean']}\t{r['y_p5']}\t{r['y_p10']}\t{r['y_p50']}\t{r['y_p90']}\t{r['y_p95']}\n")
+                    f"\t{r['y_mean']}\t{r['y_p5']}\t{r['y_p10']}\t{r['y_p50']}\t{r['y_p90']}\t{r['y_p95']}\t{r['avg_circles_per_cell']}\n")
     return np.array(summary, dtype=object)
 
 def parse_args(argv=None):
@@ -704,14 +771,14 @@ def parse_args(argv=None):
     p.add_argument("--auto-seed", action="store_true")
     p.add_argument("--init-len", type=int, default=225)
     p.add_argument("--init-len-file", type=str, default=None)
-    p.add_argument("--init-Ys", type=int, default=40)
+    p.add_argument("--init-Ys", type=int, default=None)
     p.add_argument("--init-Y-file", type=str, default=None)
     p.add_argument("--init-n-cells", type=int, default=10)
     p.add_argument("--del-rate", type=float, default=6.0)
     p.add_argument("--Ls", type=int, default=60)
     p.add_argument("--rec-model", type=int, choices=[0,1], default=1)
     p.add_argument("--rec-y-weighted", action="store_true")
-    p.add_argument("--donor-mode", type=int, choices=[0,1,2], default=2)
+    p.add_argument("--donor-mode", type=int, choices=[0,1,2], default=1)
     p.add_argument("--rec-tel-mode", type=str, choices=["copy","rnd","end"], default="copy")
     p.add_argument("--prob-circle", type=float, default=0.0)
     p.add_argument("--circle-len", type=int, default=2000)
@@ -720,7 +787,7 @@ def parse_args(argv=None):
     p.add_argument("--min-len-circle-generation", type=int, default=120)
     p.add_argument("--prob-each-circle", type=float, default=0.001)
     p.add_argument("--p-sen-death", type=float, default=0.1)
-    p.add_argument("--max-freq-senesc", type=float, default=0.9999)
+    p.add_argument("--max-freq-senesc", type=float, default=0.999)
     p.add_argument("--hard-threshold", type=int, default=512000)
     p.add_argument("--hard-keep-fraction", type=float, default=0.1)
     p.add_argument("--subsample-pds", type=int, nargs="*", default=[20,30,40])
